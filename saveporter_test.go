@@ -95,11 +95,17 @@ func FuzzConvert(f *testing.F) {
 	f.Add(prefix(fixtures.RZIP(f, 1, retroarch.Wrap(state)), 4096))
 	f.Add(prefix(fixtures.RZIP(f, 2, retroarch.Wrap(state)), 4096))
 	f.Add(prefix(fixtures.MGBAPNG(f, state), 4096))
+	f.Add(prefix(retroarch.Wrap(fixtures.GambatteState(true, false)), 4096))
+	f.Add(prefix(fixtures.MGBAGBState(3, true), 4096))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = Detect(data)
 		for _, e := range Emulators {
-			if out, err := Convert(data, Target{Emulator: e}); err == nil && len(out) < mgba.StateSize {
-				t.Fatalf("converted to %d bytes", len(out))
+			out, err := Convert(data, Target{Emulator: e})
+			if err != nil {
+				continue
+			}
+			if _, err := Detect(out); err != nil {
+				t.Fatalf("converted to something Detect refuses: %v", err)
 			}
 		}
 	})

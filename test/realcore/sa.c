@@ -1,6 +1,10 @@
 // The mGBA app's state code, on mGBA 0.10's core API:
 //   sa save <rom> <frames> <out>        boot, play scripted input, write a PNG state as the app does
 //   sa load <rom> <in> <frames> <out|-> load any state, play, print frame hash, write a raw state
+//   sa sav <rom> <sav> <frames> <wram-out>
+//                                       play with <sav> as the battery save, as the app does: the
+//                                       app writes the save back into the same file; then dump
+//                                       the first 0x200 bytes of WRAM
 #include <mgba/core/core.h>
 #include <mgba/core/config.h>
 #include <mgba/core/serialize.h>
@@ -36,6 +40,20 @@ int main(int argc, char **argv) {
 	color_t *buf = calloc(w * h, sizeof(color_t));
 	core->setVideoBuffer(core, buf, w);
 	if (!mCoreLoadFile(core, argv[2])) { fprintf(stderr, "no rom\n"); return 2; }
+	if (!strcmp(argv[1], "sav")) {
+		struct VFile *sav = VFileOpen(argv[3], O_CREAT | O_RDWR);
+		if (!sav || !core->loadSave(core, sav)) { fprintf(stderr, "no save\n"); return 2; }
+		core->reset(core);
+		play(core, atoi(argv[4]));
+		FILE *f = fopen(argv[5], "wb");
+		for (uint32_t a = 0xC000; a < 0xC200; a++) fputc(core->rawRead8(core, a, -1), f);
+		fclose(f);
+		// Unloading the ROM writes the save back, footer included.
+		core->unloadROM(core);
+		core->deinit(core);
+		printf("sav: ok\n");
+		return 0;
+	}
 	core->reset(core);
 	core->runFrame(core);
 	if (!strcmp(argv[1], "save")) {

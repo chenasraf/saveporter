@@ -74,7 +74,8 @@ func newRoot(e env) *cobra.Command {
 		Use:   "saveporter [flags] <input> <output>\n  saveporter [flags] --to <emulator> -o <dir> <input>...",
 		Short: "Convert emulator save states between emulators",
 		Long: `Convert emulator save states between emulators: RetroArch, EmulatorJS (the web player
-RomM embeds) and the mGBA app.
+RomM embeds) and the mGBA app. Game Boy Advance states, and Game Boy and Game Boy Color states of
+the mGBA and Gambatte cores. For Game Boy battery saves, see "saveporter save".
 
 The input's format is detected. The target comes from the output's name:
   .ss0-.ss9                       the mGBA app
@@ -111,7 +112,7 @@ auto-state, .stateN and .ssN the same numbered slot.`,
 	f.BoolVarP(&o.dryRun, "dry-run", "n", false, "show what would be written, write nothing")
 	f.BoolVarP(&o.quiet, "quiet", "q", false, "report errors only")
 	f.BoolVar(&o.json, "json", false, "report as JSON")
-	root.AddCommand(newInfo(e))
+	root.AddCommand(newInfo(e), newSave(e))
 	return root
 }
 

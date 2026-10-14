@@ -83,8 +83,14 @@ func printInfo(w io.Writer, results []infoResult) {
 			game += " (" + in.GameCode + ")"
 		}
 		fmt.Fprintf(w, "  system     %s (%s core)\n", strings.ToUpper(string(in.System)), coreName(in.Core))
-		fmt.Fprintf(w, "  state      version %d\n", in.StateVersion)
+		if in.Layout != "" {
+			fmt.Fprintf(w, "  state      %s\n", in.Layout)
+		} else {
+			fmt.Fprintf(w, "  state      version %d\n", in.StateVersion)
+		}
 		fmt.Fprintf(w, "  container  %s, written by %s\n", container, writersName(in.Writers))
-		fmt.Fprintf(w, "  game       %s, ROM CRC %08x\n", strings.TrimSpace(game), in.ROMCRC)
+		if game = strings.TrimSpace(game); game != "" || in.ROMCRC != 0 {
+			fmt.Fprintf(w, "  game       %s, ROM CRC %08x\n", game, in.ROMCRC)
+		}
 	}
 }

@@ -1,7 +1,8 @@
 # saveporter
 
-**`saveporter`** converts emulator save states between emulators. Save a game in RomM's web player,
-pick it up in RetroArch on your Steam Deck, carry it over to the mGBA app, and back.
+**`saveporter`** converts emulator save states and battery saves between emulators. Save a game in
+RomM's web player, pick it up in RetroArch on your Steam Deck, carry it over to the mGBA app, and
+back.
 
 ![Release](https://img.shields.io/github/v/release/chenasraf/saveporter)
 ![Downloads](https://img.shields.io/github/downloads/chenasraf/saveporter/total)
@@ -16,15 +17,22 @@ pick it up in RetroArch on your Steam Deck, carry it over to the mGBA app, and b
 - **Picks the target from the output's name**, or from `--to`
 - **Rewrites newer states for older emulators**: a state from a newer core is rewritten in the
   layout the older one reads, so it loads instead of being refused
+- **Converts battery saves** between every Game Boy and Game Boy Color emulator, cartridge clock
+  included
 - **Batch conversion** of files and whole folders, mapping slots between emulators
 - **Never overwrites** an existing file unless you say so, with a dry run to check first
 - **A Go library** for programs that sync or manage saves
 
 ### Supported
 
-| System           | Emulators                                                        |
-| ---------------- | ---------------------------------------------------------------- |
-| Game Boy Advance | RetroArch (mGBA core), EmulatorJS (mGBA core), the mGBA app 0.10 |
+| System           | Save states                                                      | Battery saves                                                                      |
+| ---------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Game Boy Advance | RetroArch (mGBA core), EmulatorJS (mGBA core), the mGBA app 0.10 |                                                                                    |
+| Game Boy / Color | RetroArch and EmulatorJS (Gambatte or mGBA core), the mGBA app   | RetroArch (Gambatte, SameBoy, VBA-M, Gearboy, mGBA cores), EmulatorJS, the mGBA app |
+
+A state carries over only between emulators running the same core: Gambatte and mGBA model the Game
+Boy differently, so a Gambatte state can't become an mGBA one. Battery saves carry over between any
+of them.
 
 ---
 
@@ -119,6 +127,39 @@ Pokemon SoulGold.state
 `saveporter` exits 0 when every input was converted or skipped by rule (an existing output, a file
 that isn't a state), 1 when any input failed, and 2 on a usage mistake.
 
+### Convert a battery save
+
+```bash
+saveporter save --rom "Pokemon Crystal.gbc" --from gambatte --to mgba-app \
+  "Pokemon Crystal.srm" "Pokemon Crystal.sav"
+```
+
+```
+Pokemon Crystal.srm + Pokemon Crystal.rtc → Pokemon Crystal.sav
+  GBC PM_CRYSTAL (BYTE) · MBC3 · gambatte → mgba-app
+```
+
+A battery save is the cartridge's RAM, and its clock when it has one. The input is a `.srm`, read
+with the `.rtc` beside it, or the mGBA app's `.sav`; the output's name without its extension names
+what's written. The ROM (or a zip of it) is required: only its header says what the save holds.
+
+| Format     | Emulator                                | Files            |
+| ---------- | --------------------------------------- | ---------------- |
+| `gambatte` | RetroArch's and EmulatorJS's Gambatte   | `.srm`, `.rtc`   |
+| `sameboy`  | RetroArch's SameBoy                     | `.srm`, `.rtc`   |
+| `vbam`     | RetroArch's VBA-M                       | `.srm`, `.rtc`   |
+| `gearboy`  | RetroArch's Gearboy                     | `.srm`, `.rtc`   |
+| `mgba`     | RetroArch's and EmulatorJS's mGBA       | `.srm`, `.rtc`   |
+| `mgba-app` | the mGBA app                            | `.sav`           |
+
+The clock is carried over at the current time (`--now` sets another): it reads in the output what it
+reads in the input, and runs on from there. EmulatorJS keeps no `.rtc`, so a save from it has no
+clock, and one for it needs only the `.srm`.
+
+Some emulators keep no save for some cartridges, and the conversion is refused: Gambatte runs no
+MBC7 (Kirby Tilt 'n' Tumble) or Pocket Camera, Gearboy no MBC2, MBC7 or HuC3. SameBoy's and mGBA's
+RetroArch cores don't save a HuC3 cartridge's clock.
+
 ---
 
 ## 🧩 How it works
@@ -140,6 +181,16 @@ newer one reads the extra details back after a round trip.
 
 `--state-version` sets another version for an emulator older or newer than these.
 
+Game Boy states from mGBA have versions of their own, and every mGBA above writes the same one.
+Gambatte's states have no version: they're labelled fields, and builds of the core differ only in
+optional ones. RetroArch's builds include the network link's two fields and EmulatorJS's don't, and
+Gambatte refuses a state of any size but its own, so the conversion adds or drops those fields.
+
+Battery saves hold the same RAM in every emulator, stored differently: padded to whole 8 KiB banks
+or not, MBC2's half-bytes one or two to a byte, MBC7's 16-bit words in either byte order. Clocks
+differ more: Gambatte keeps only when the clock read zero, the others the registers and the time
+they held at, each in its own layout.
+
 ---
 
 ## 📦 Go library
@@ -156,7 +207,15 @@ out, err := saveporter.Convert(data, saveporter.Target{Emulator: saveporter.Emul
 ```
 
 `ParseStateName`, `StateFileName` and `TargetForName` map file names and slots between emulators.
-The formats themselves are in the `retroarch` and `mgba` packages.
+The formats themselves are in the `retroarch`, `mgba` and `gambatte` packages.
+
+```go
+files := gb.Files{gb.ExtSRM: srm, gb.ExtRTC: rtc}
+out, err := saveporter.ConvertSave(files, gb.Gambatte, gb.MGBAApp, romHeader, time.Now())
+// out[gb.ExtSav]
+```
+
+The `gb` package reads and writes each emulator's battery saves.
 
 ---
 
@@ -174,6 +233,20 @@ For every state, with the game's clock frozen and scripted input, it checks that
 state loads in its target, that a downgrade matches byte for byte what the older mGBA itself writes,
 that a round trip plays out identically to the original for thousands of frames, and that the mGBA
 app's PNG states decode to exactly what it writes raw.
+
+For the Game Boy, `test/realcore/run-saves.sh` runs RetroArch's Gambatte, SameBoy, VBA-M, Gearboy
+and mGBA cores (a Steam Deck's), Gambatte as EmulatorJS builds it, and the mGBA app:
+
+```bash
+test/realcore/run-saves.sh <cores-dir> [<gambatte-states-dir> <roms-dir>]
+```
+
+Test cartridges built for it read their whole battery RAM and clock at boot and change every byte.
+Each emulator plays a save converted for it, at a later time, and must read exactly the RAM and the
+clock advanced by the time that passed; what it writes back is converted to every other emulator,
+played later still, and converted back, with every read checked. Gambatte states are checked to load
+in the other build, to match byte for byte what that build itself writes, to come back unchanged
+from a round trip, and to play out identically.
 
 ---
 

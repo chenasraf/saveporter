@@ -26,6 +26,13 @@ fuzz:
 test-realcore:
 	test/realcore/run.sh "$(STATES)" "$(ROMS)" $(CORE)
 
+# The Game Boy checks: battery saves on test cartridges through every core, and Gambatte states.
+# CORES is a folder of RetroArch's GB cores, such as a Steam Deck's; STATES and ROMS optionally
+# Gambatte states and their ROMs.
+.PHONY: test-realcore-gb
+test-realcore-gb:
+	test/realcore/run-saves.sh "$(CORES)" $(if $(STATES),"$(STATES)" "$(ROMS)")
+
 .PHONY: install
 install: build
 	cp $(BIN) ~/.local/bin/

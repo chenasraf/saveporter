@@ -10,8 +10,10 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/chenasraf/saveporter/gambatte"
 	"github.com/chenasraf/saveporter/mgba"
 	"github.com/chenasraf/saveporter/retroarch"
 )
@@ -38,7 +40,17 @@ var Emulators = []Emulator{RetroArch, EmulatorJS, MGBA}
 // System is a console.
 type System string
 
-const GBA System = "gba"
+const (
+	GBA System = "gba"
+	GB  System = "gb"
+	GBC System = "gbc"
+)
+
+// Cores.
+const (
+	CoreMGBA     = "mgba"
+	CoreGambatte = "gambatte"
+)
 
 // Container is how a core's state is wrapped in a file.
 type Container string
@@ -57,9 +69,11 @@ type Info struct {
 	System System
 	// Core is the emulator core whose state it is.
 	Core string
-	// StateVersion is the core's state layout version.
+	// StateVersion is the core's state layout version. Gambatte's states have none.
 	StateVersion uint32
-	Container    Container
+	// Layout is the optional parts a Gambatte state has, which tell its builds apart.
+	Layout    string `json:",omitempty"`
+	Container Container
 	// Compression is how the file is compressed, "none" when it isn't.
 	Compression string
 	// Writers are the emulators that write files of this shape.
@@ -96,15 +110,40 @@ func Detect(data []byte) (Info, error) {
 			info.Container, info.Writers = ContainerRaw, []Emulator{MGBA, RetroArch}
 		}
 	}
-	state, err := mgba.State(core)
+	if state, err := mgba.State(core); err == nil {
+		info.Core = CoreMGBA
+		if mgba.IsGB(state) {
+			var cgb bool
+			cgb, info.Title, info.ROMCRC = mgba.GBInfo(state)
+			info.System = gbSystem(cgb)
+			info.StateVersion, _ = mgba.GBVersion(state)
+			return info, nil
+		}
+		info.System = GBA
+		info.StateVersion, _ = mgba.Version(state)
+		info.ROMCRC = mgba.ROMCRC(state)
+		info.Title, info.GameCode = mgba.Title(state)
+		return info, nil
+	}
+	if info.Container == ContainerMGBAPNG {
+		return Info{}, fmt.Errorf("%w: %w", ErrUnknownFormat, mgba.ErrNotState)
+	}
+	state, err := gambatte.Parse(core)
 	if err != nil {
 		return Info{}, fmt.Errorf("%w: %w", ErrUnknownFormat, err)
 	}
-	info.System, info.Core = GBA, "mgba"
-	info.StateVersion, _ = mgba.Version(state)
-	info.ROMCRC = mgba.ROMCRC(state)
-	info.Title, info.GameCode = mgba.Title(state)
+	info.System, info.Core, info.Layout = gbSystem(state.CGB()), CoreGambatte, state.Layout().String()
+	if info.Container == ContainerRaw {
+		info.Writers = []Emulator{RetroArch}
+	}
 	return info, nil
+}
+
+func gbSystem(cgb bool) System {
+	if cgb {
+		return GBC
+	}
+	return GB
 }
 
 // Target is what Convert writes for.
@@ -136,28 +175,33 @@ func DefaultStateVersion(e Emulator) uint32 {
 // ErrUnknownEmulator means a Target names an emulator saveporter doesn't write for.
 var ErrUnknownEmulator = errors.New("unknown emulator")
 
+// ErrOtherCore means the target emulator runs another core than the state is of, which models the
+// console differently: no conversion carries a state between them.
+var ErrOtherCore = errors.New("the target emulator runs another core")
+
 // Convert rewrites a save state for the target emulator.
 func Convert(data []byte, to Target) ([]byte, error) {
-	if _, err := Detect(data); err != nil {
+	info, err := Detect(data)
+	if err != nil {
 		return nil, err
+	}
+	if !slices.Contains(Emulators, to.Emulator) {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownEmulator, to.Emulator)
 	}
 	core := data
 	if !mgba.IsPNG(data) {
-		var err error
 		if core, err = retroarch.CoreState(data); err != nil {
 			return nil, err
 		}
 	}
-	state, err := mgba.State(core)
-	if err != nil {
-		return nil, err
-	}
-	version := to.StateVersion
-	if version == 0 {
-		version = DefaultStateVersion(to.Emulator)
-	}
-	if version != 0 && version != KeepStateVersion {
-		if state, err = mgba.ForVersion(state, version); err != nil {
+	var state []byte
+	switch info.Core {
+	case CoreGambatte:
+		if state, err = forGambatte(core, to); err != nil {
+			return nil, err
+		}
+	default:
+		if state, err = forMGBA(core, to); err != nil {
 			return nil, err
 		}
 	}
@@ -168,4 +212,44 @@ func Convert(data []byte, to Target) ([]byte, error) {
 		return state, nil
 	}
 	return nil, fmt.Errorf("%w: %q", ErrUnknownEmulator, to.Emulator)
+}
+
+func forMGBA(core []byte, to Target) ([]byte, error) {
+	state, err := mgba.State(core)
+	if err != nil {
+		return nil, err
+	}
+	version := to.StateVersion
+	if version == 0 {
+		version = DefaultStateVersion(to.Emulator)
+	}
+	if version == 0 || version == KeepStateVersion {
+		return state, nil
+	}
+	if mgba.IsGB(state) {
+		// Every mGBA in use writes the same Game Boy version; a version given for GBA states
+		// doesn't apply.
+		if to.StateVersion == 0 {
+			version = mgba.GBNewestKnownVersion
+		}
+		return mgba.GBForVersion(state, version)
+	}
+	return mgba.ForVersion(state, version)
+}
+
+// forGambatte rewrites a Gambatte state with the records the target's build of the core writes.
+func forGambatte(core []byte, to Target) ([]byte, error) {
+	state, err := gambatte.Parse(core)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case to.Emulator == MGBA:
+		return nil, fmt.Errorf("%w: the mGBA app runs mGBA, the state is Gambatte's", ErrOtherCore)
+	case to.StateVersion == KeepStateVersion:
+		return core, nil
+	case to.Emulator == EmulatorJS:
+		return state.For(gambatte.EmulatorJSLayout).Bytes(), nil
+	}
+	return state.For(gambatte.RetroArchLayout).Bytes(), nil
 }

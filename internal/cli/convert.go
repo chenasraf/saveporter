@@ -31,6 +31,8 @@ type result struct {
 	// To is the emulator written for, and ToVersion the core state version written.
 	To        saveporter.Emulator `json:"to,omitempty"`
 	ToVersion uint32              `json:"toVersion,omitempty"`
+	// ToLayout is the Gambatte state layout written.
+	ToLayout string `json:"toLayout,omitempty"`
 }
 
 // job is one input to convert to one output.
@@ -201,7 +203,7 @@ func convertOne(e env, o options, j job) result {
 		return r
 	}
 	if to, err := saveporter.Detect(out); err == nil {
-		r.ToVersion = to.StateVersion
+		r.ToVersion, r.ToLayout = to.StateVersion, to.Layout
 	}
 	if j.output != stdioMarker && !o.force {
 		if _, err := os.Lstat(j.output); err == nil {
@@ -297,8 +299,9 @@ func printResults(w, errw io.Writer, o options, results []result) {
 			}
 			fmt.Fprintf(w, "%s%s → %s\n", prefix, r.Input, r.Output)
 			if r.From != nil {
-				fmt.Fprintf(w, "  %s · %s state v%d → v%d · %s (%s) → %s\n",
-					strings.ToUpper(string(r.From.System)), coreName(r.From.Core), r.From.StateVersion, r.ToVersion,
+				fmt.Fprintf(w, "  %s · %s state %s → %s · %s (%s) → %s\n",
+					strings.ToUpper(string(r.From.System)), coreName(r.From.Core),
+					stateVersion(r.From.StateVersion, r.From.Layout), stateVersion(r.ToVersion, r.ToLayout),
 					writersName(r.From.Writers), r.From.Compression, emulatorName(r.To))
 			}
 		}
@@ -315,8 +318,19 @@ func printResults(w, errw io.Writer, o options, results []result) {
 }
 
 func coreName(core string) string {
-	if core == "mgba" {
+	switch core {
+	case saveporter.CoreMGBA:
 		return "mGBA"
+	case saveporter.CoreGambatte:
+		return "Gambatte"
 	}
 	return core
+}
+
+// stateVersion shows a state's layout: mGBA's version, or the optional parts a Gambatte state has.
+func stateVersion(version uint32, layout string) string {
+	if layout != "" {
+		return layout
+	}
+	return fmt.Sprintf("v%d", version)
 }

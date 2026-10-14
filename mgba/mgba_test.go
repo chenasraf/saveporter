@@ -83,12 +83,35 @@ func TestForVersionRefusesUnknownVersions(t *testing.T) {
 }
 
 func TestStateRejectsOtherData(t *testing.T) {
-	gb := fixtures.MGBAState(7)
-	binary.LittleEndian.PutUint32(gb, 0x00400002) // a Game Boy state
-	for name, data := range map[string][]byte{"short": make([]byte, 100), "game boy": gb} {
+	other := fixtures.MGBAState(7)
+	binary.LittleEndian.PutUint32(other, 0x02000007)
+	for name, data := range map[string][]byte{"short": make([]byte, 100), "other magic": other} {
 		if _, err := State(data); !errors.Is(err, ErrNotState) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestGBState(t *testing.T) {
+	raw := fixtures.MGBAGBState(3, true)
+	for name, data := range map[string][]byte{"raw": raw, "png": fixtures.MGBAPNG(t, raw)} {
+		got, err := State(data)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !IsGB(got) || !bytes.Equal(got, raw) {
+			t.Fatalf("%s: not the raw Game Boy state", name)
+		}
+		cgb, title, crc := GBInfo(got)
+		if !cgb || title != fixtures.GBTitle || crc != fixtures.ROMCRC {
+			t.Fatalf("%s: %v %q %#x", name, cgb, title, crc)
+		}
+	}
+	if _, err := GBForVersion(raw, 3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GBForVersion(fixtures.MGBAGBState(4, false), 3); !errors.Is(err, ErrTooNew) {
+		t.Fatalf("a newer Game Boy state: %v", err)
 	}
 }
 

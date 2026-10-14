@@ -71,7 +71,8 @@ var (
 // IsPNG reports whether data is a state the mGBA app kept in a PNG.
 func IsPNG(data []byte) bool { return bytes.HasPrefix(data, pngSignature) }
 
-// State returns an mGBA Game Boy Advance state in the raw layout, from a raw or PNG state.
+// State returns an mGBA Game Boy Advance or Game Boy state in the raw layout, from a raw or PNG
+// state.
 func State(data []byte) ([]byte, error) {
 	if IsPNG(data) {
 		var err error
@@ -79,7 +80,10 @@ func State(data []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if _, err := Version(data); err != nil {
+	if _, err := Version(data); err == nil {
+		return data, nil
+	}
+	if _, err := GBVersion(data); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -105,6 +109,57 @@ func ROMCRC(state []byte) uint32 { return binary.LittleEndian.Uint32(state[8:]) 
 func Title(state []byte) (title, code string) {
 	clean := func(b []byte) string { return strings.TrimRight(string(b), "\x00 ") }
 	return clean(state[0x10:0x1C]), clean(state[0x1C:0x20])
+}
+
+// Game Boy and Game Boy Color states, which mGBA keeps in a block of their own with versions of
+// their own. Every mGBA in use writes version 3 (the 0.10 app, the libretro core, EmulatorJS 4.2.3's
+// core), and mGBA refuses newer versions, so a newer one is refused here rather than rewritten.
+const (
+	// GBStateSize is the size of a Game Boy state's block, before the extra data.
+	GBStateSize = 0x11800
+	// GBNewestKnownVersion is the newest Game Boy state layout this package knows.
+	GBNewestKnownVersion = 3
+
+	gbStateMagic = 0x00400000
+	gbModelCGB   = 0x80
+)
+
+// GBVersion returns the layout version of a raw mGBA Game Boy state.
+func GBVersion(state []byte) (uint32, error) {
+	if len(state) < GBStateSize {
+		return 0, ErrNotState
+	}
+	magic := binary.LittleEndian.Uint32(state)
+	if magic < gbStateMagic || magic > gbStateMagic+0xFF {
+		return 0, ErrNotState
+	}
+	return magic - gbStateMagic, nil
+}
+
+// IsGB reports whether a raw state is of a Game Boy or Game Boy Color.
+func IsGB(state []byte) bool {
+	_, err := GBVersion(state)
+	return err == nil
+}
+
+// GBInfo returns what a raw Game Boy state recorded about its game: whether it ran as a Game Boy
+// Color, the cartridge header's title, and the ROM's CRC32.
+func GBInfo(state []byte) (cgb bool, title string, crc uint32) {
+	return state[8]&gbModelCGB != 0, strings.TrimRight(string(state[0x10:0x20]), "\x00 "),
+		binary.LittleEndian.Uint32(state[4:])
+}
+
+// GBForVersion returns a raw Game Boy state as an mGBA whose states are of the given version loads
+// it.
+func GBForVersion(state []byte, version uint32) ([]byte, error) {
+	have, err := GBVersion(state)
+	if err != nil {
+		return nil, err
+	}
+	if have > version {
+		return nil, fmt.Errorf("%w: Game Boy state version %d, newest loadable %d", ErrTooNew, have, version)
+	}
+	return state, nil
 }
 
 // ForVersion returns a raw state as an mGBA whose states are of the given version loads it.
@@ -186,7 +241,7 @@ func fromPNG(data []byte) ([]byte, error) {
 	if state == nil {
 		return nil, fmt.Errorf("%w: the PNG holds no state", ErrNotState)
 	}
-	if len(state) != StateSize {
+	if len(state) != StateSize && len(state) != GBStateSize {
 		return nil, fmt.Errorf("%w: the PNG's state is %d bytes", ErrNotState, len(state))
 	}
 	if len(ext) == 0 {
@@ -196,7 +251,7 @@ func fromPNG(data []byte) ([]byte, error) {
 	// The raw layout: the state, a table of (tag, size, offset from the start) closed by a zero
 	// entry, then each item's data, in tag order.
 	slices.SortStableFunc(ext, func(a, b extItem) int { return int(a.tag) - int(b.tag) })
-	offset := StateSize + (len(ext)+1)*extHeaderSize
+	offset := len(state) + (len(ext)+1)*extHeaderSize
 	out := slices.Grow(state, offset-len(state))
 	for _, e := range ext {
 		out = binary.LittleEndian.AppendUint32(out, e.tag)
