@@ -20,6 +20,12 @@ test:
 fuzz:
 	go test ./... -run XXX -fuzz . -fuzztime 60s
 
+# Runs conversions through the real emulators in Docker. STATES and ROMS are folders; CORE is an
+# optional extra mGBA libretro core, such as a Steam Deck's.
+.PHONY: test-realcore
+test-realcore:
+	test/realcore/run.sh "$(STATES)" "$(ROMS)" $(CORE)
+
 .PHONY: install
 install: build
 	cp $(BIN) ~/.local/bin/
