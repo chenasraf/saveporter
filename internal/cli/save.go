@@ -27,7 +27,7 @@ type saveOptions struct {
 func newSave(e env) *cobra.Command {
 	var o saveOptions
 	cmd := &cobra.Command{
-		Use:   "save --rom <rom> --to <format> [--from <format>] <input> <output>",
+		Use:   "save --to <format> [--from <format>] [--rom <rom>] <input> <output>",
 		Short: "Convert Game Boy and Game Boy Color battery saves between emulators",
 		Long: `Convert a Game Boy or Game Boy Color battery save between emulators.
 
@@ -35,7 +35,10 @@ The input is a ".srm", read with the ".rtc" beside it when there is one, or the 
 ".sav". The output's name without its extension names the files written: "<name>.srm" and
 "<name>.rtc", or "<name>.sav" for the mGBA app.
 
---rom is the game's ROM (or a zip of it): its header says what the save holds.
+--rom is the game's ROM (or a zip of it), whose header says what the save holds. Without it,
+the files say what they can; when that isn't enough for the conversion (an 8 KiB save may be
+MBC2's, which mGBA stores packed; a Gambatte clock may be an MBC3's or a HuC3's), it fails
+and asks for the ROM.
 
 Formats are the emulator cores:
   gambatte   RetroArch's and EmulatorJS's Gambatte core
@@ -55,7 +58,7 @@ EmulatorJS keeps no ".rtc": use its core's format and leave the clock out.`,
 	}
 	cmd.SetFlagErrorFunc(flagError)
 	f := cmd.Flags()
-	f.StringVar(&o.rom, "rom", "", "the game's ROM, or a zip of it (required)")
+	f.StringVar(&o.rom, "rom", "", "the game's ROM, or a zip of it, when the files don't say enough")
 	f.StringVar(&o.from, "from", "", "the input's format (default: mgba-app for a .sav)")
 	f.StringVarP(&o.to, "to", "t", "", "the output's format (required): "+formatList())
 	f.StringVar(&o.now, "now", "", "carry the clock over at this unix time (default: now)")
@@ -82,9 +85,6 @@ func parseFormat(flag, s string) (gb.Format, error) {
 }
 
 func runSave(e env, o saveOptions, input, output string) error {
-	if o.rom == "" {
-		return usagef("--rom is required: the ROM's header says what the save holds")
-	}
 	if o.to == "" {
 		return usagef("--to is required: %s", formatList())
 	}
@@ -112,15 +112,20 @@ func runSave(e env, o saveOptions, input, output string) error {
 		now = time.Unix(n, 0)
 	}
 
-	header, err := readHeader(o.rom)
-	if err != nil {
-		return err
+	var header []byte
+	if o.rom != "" {
+		if header, err = readHeader(o.rom); err != nil {
+			return err
+		}
 	}
 	files, read, err := readSaveFiles(input, from)
 	if err != nil {
 		return err
 	}
 	out, err := saveporter.ConvertSave(files, from, to, header, now)
+	if errors.Is(err, gb.ErrNeedHeader) {
+		return fmt.Errorf("%w; pass --rom", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -148,13 +153,16 @@ func runSave(e env, o saveOptions, input, output string) error {
 			}
 		}
 	}
-	cart, _ := gb.ParseCart(header)
 	verb := "→"
 	if o.dryRun {
 		verb = "would write"
 	}
 	fmt.Fprintf(e.stdout, "%s %s %s\n", strings.Join(read, " + "), verb, strings.Join(paths, " + "))
-	fmt.Fprintf(e.stdout, "  %s · %s · %s → %s\n", cartName(cart), cart.Mapper(), from, to)
+	if cart, err := gb.ParseCart(header); err == nil {
+		fmt.Fprintf(e.stdout, "  %s · %s · %s → %s\n", cartName(cart), cart.Mapper(), from, to)
+	} else {
+		fmt.Fprintf(e.stdout, "  %s → %s\n", from, to)
+	}
 	return nil
 }
 

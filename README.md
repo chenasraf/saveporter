@@ -141,7 +141,13 @@ Pokemon Crystal.srm + Pokemon Crystal.rtc → Pokemon Crystal.sav
 
 A battery save is the cartridge's RAM, and its clock when it has one. The input is a `.srm`, read
 with the `.rtc` beside it, or the mGBA app's `.sav`; the output's name without its extension names
-what's written. The ROM (or a zip of it) is required: only its header says what the save holds.
+what's written.
+
+`--rom` (the ROM, or a zip of it) is optional. Its header says what the save holds; without it, the
+files say what they can, and the conversion goes through whenever every cartridge they could be
+from converts the same. When they don't, it asks for the ROM: an 8 KiB save with nothing past its
+first 512 bytes may be MBC2's, which mGBA stores packed, and Gambatte's clock file is the same for
+MBC3 and HuC3 cartridges, which the others store differently.
 
 | Format     | Emulator                                | Files            |
 | ---------- | --------------------------------------- | ---------------- |
@@ -212,7 +218,7 @@ The formats themselves are in the `retroarch`, `mgba` and `gambatte` packages.
 ```go
 files := gb.Files{gb.ExtSRM: srm, gb.ExtRTC: rtc}
 out, err := saveporter.ConvertSave(files, gb.Gambatte, gb.MGBAApp, romHeader, time.Now())
-// out[gb.ExtSav]
+// out[gb.ExtSav]; romHeader may be nil, failing with gb.ErrNeedHeader when the files don't say enough
 ```
 
 The `gb` package reads and writes each emulator's battery saves.

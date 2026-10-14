@@ -108,8 +108,7 @@ func TestSaveUsage(t *testing.T) {
 	dir := t.TempDir()
 	rom, srm, _ := clockGame(t, dir)
 	for name, args := range map[string][]string{
-		"no rom":       {"save", "--from", "gambatte", "--to", "mgba", srm, "x.srm"},
-		"no to":        {"save", "--rom", rom, "--from", "gambatte", srm, "x.srm"},
+		"no to":       {"save", "--rom", rom, "--from", "gambatte", srm, "x.srm"},
 		"unknown to":   {"save", "--rom", rom, "--from", "gambatte", "--to", "snes9x", srm, "x.srm"},
 		"no from":      {"save", "--rom", rom, "--to", "mgba", srm, "x.srm"},
 		"bad now":      {"save", "--rom", rom, "--from", "gambatte", "--to", "mgba", "--now", "soon", srm, "x.srm"},
@@ -118,6 +117,25 @@ func TestSaveUsage(t *testing.T) {
 		if r := runCLI(t, nil, args...); r.code != 2 {
 			t.Errorf("%s: exit %d: %s", name, r.code, r.stderr)
 		}
+	}
+}
+
+func TestSaveWithoutROM(t *testing.T) {
+	dir := t.TempDir()
+	// Gambatte's clock is an MBC3's or a HuC3's: the ROM says which.
+	_, srm, _ := clockGame(t, dir)
+	r := runCLI(t, nil, "save", "--from", "gambatte", "--to", "mgba-app", srm, filepath.Join(dir, "x.sav"))
+	if r.code != 1 || !strings.Contains(r.stderr, "pass --rom") {
+		t.Fatalf("exit %d: %s", r.code, r.stderr)
+	}
+	// 32 KiB of RAM and no clock is the same in either.
+	plain := write(t, dir, "Plain.srm", bytes.Repeat([]byte{1, 2, 3}, 0x8000/3+1)[:0x8000])
+	r = runCLI(t, nil, "save", "--from", "gambatte", "--to", "mgba-app", plain, filepath.Join(dir, "Plain.sav"))
+	if r.code != 0 || !strings.Contains(r.stdout, "gambatte → mgba-app") {
+		t.Fatalf("exit %d: %s%s", r.code, r.stdout, r.stderr)
+	}
+	if sav, err := os.ReadFile(filepath.Join(dir, "Plain.sav")); err != nil || len(sav) != 0x8000 {
+		t.Fatalf("%d bytes, %v", len(sav), err)
 	}
 }
 

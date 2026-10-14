@@ -42,6 +42,9 @@ UNSUPPORTED = {("gearboy", "mbc2"), ("gearboy", "huc3-32k")}
 HUC3_CLOCK = {"gambatte", "gambatte-ejs", "vbam", "app"}
 
 failures = []
+# How conversions without the ROM went: refused, the same files as with it, or different files
+# (each then played and checked like the ROM's).
+norom = {"refused": 0, "identical": 0, "different": 0}
 
 
 def check(ok, what):
@@ -82,12 +85,27 @@ def play(core, rom, stem, now, out):
 
 
 def convert(rom, frm, to, src, dst, now):
+    """Converts with the ROM into dst, and again without it into dst-norom. Returns whether the
+    conversion without the ROM went through and wrote different files, which then need playing."""
     fmt_from, fmt_to = CORES[frm][0], CORES[to][0]
     inp = src + (".sav" if fmt_from == "mgba-app" else ".srm")
-    for x in (".srm", ".rtc", ".sav"):
-        if os.path.exists(dst + x):
-            os.remove(dst + x)
+    for stem in (dst, dst + "-norom"):
+        for x in (".srm", ".rtc", ".sav"):
+            if os.path.exists(stem + x):
+                os.remove(stem + x)
     sp("save", "--rom", rom, "--from", fmt_from, "--to", fmt_to, "--now", str(now), "-f", inp, dst + ".x")
+    try:
+        sp("save", "--from", fmt_from, "--to", fmt_to, "--now", str(now), "-f", inp, dst + "-norom.x")
+    except RuntimeError as e:
+        if "the ROM's header is needed" not in str(e) and "keeps none" not in str(e):
+            raise
+        norom["refused"] += 1
+        return False
+    same = all(
+        (os.path.exists(dst + x) and open(dst + x, "rb").read()) == (os.path.exists(dst + "-norom" + x) and open(dst + "-norom" + x, "rb").read())
+        for x in (".srm", ".rtc", ".sav"))
+    norom["identical" if same else "different"] += 1
+    return not same
 
 
 def expect_sums(ram, mbc2):
@@ -135,12 +153,17 @@ def reads(core, wram, ram, mbc2, clock, what):
     return ok
 
 
-def seed_files(cart, ram_size, mbc2, rtc, seed_seconds, d):
-    """The seed as Gambatte's files, which saveporter's Gambatte reader takes as given."""
+def seed_ram(cart, ram_size, mbc2):
     rnd = random.Random(cart)
     ram = bytes(rnd.randrange(256) for _ in range(ram_size))
     if mbc2:
         ram = bytes(0xF0 | (x & 15) for x in ram)
+    return ram
+
+
+def seed_files(cart, ram_size, mbc2, rtc, seed_seconds, d):
+    """The seed as Gambatte's files, which saveporter's Gambatte reader takes as given."""
+    ram = seed_ram(cart, ram_size, mbc2)
     pad = 0x2000 if mbc2 or ram_size < 0x2000 else ram_size
     open(d + "/seed.srm", "wb").write(ram + bytes([0xFF]) * (pad - len(ram)))
     if rtc:
@@ -158,7 +181,7 @@ def chain(carts_dir, name, model, a):
     cart = f"{name}-{model}"
     rom = f"{carts_dir}/{cart}.gb"
     d = f"{WORK}/saves/{cart}"
-    ram = seed_files(cart, size, mbc2, rtc or huc3, SEED_SECONDS, d)
+    ram = seed_ram(cart, size, mbc2)
 
     def clock(t, *chain):
         """The clock the cartridge reads at t, when every core the save went through keeps it."""
@@ -175,13 +198,21 @@ def chain(carts_dir, name, model, a):
         except RuntimeError:
             pass
         return
+    def play_norom(core, dst, at, ram, clk, what):
+        """Plays the conversion without the ROM, when it wrote other files than with it."""
+        w = play(core, rom, dst + "-norom", at, dst + "-noromout")
+        reads(core, w, ram, mbc2, clk, f"{what}, converted without the ROM")
+
     try:
-        convert(rom, "gambatte", a, f"{d}/seed", f"{d}/{a}-seed", T0)
+        differs = convert(rom, "gambatte", a, f"{d}/seed", f"{d}/{a}-seed", T0)
     except RuntimeError as e:
         check(False, f"{cart} seed → {a}: {e}")
         return
+    what = f"{cart} {a} reads its seed"
+    if differs:
+        play_norom(a, f"{d}/{a}-seed", STEPS[0], ram, clock(STEPS[0], a), what)
     w = play(a, rom, f"{d}/{a}-seed", STEPS[0], f"{d}/{a}-1")
-    if not reads(a, w, ram, mbc2, clock(STEPS[0], a), f"{cart} {a} reads its seed"):
+    if not reads(a, w, ram, mbc2, clock(STEPS[0], a), what):
         return
     ram1 = bump(ram, mbc2)
     for b in CORES:
@@ -189,20 +220,26 @@ def chain(carts_dir, name, model, a):
             continue
         pair = f"{cart} {a} → {b}"
         try:
-            convert(rom, a, b, f"{d}/{a}-1", f"{d}/{a}-{b}-2", STEPS[0])
+            differs = convert(rom, a, b, f"{d}/{a}-1", f"{d}/{a}-{b}-2", STEPS[0])
         except RuntimeError as e:
             check(False, f"{pair}: {e}")
             continue
+        what = f"{pair}: {b} reads it"
+        if differs:
+            play_norom(b, f"{d}/{a}-{b}-2", STEPS[1], ram1, clock(STEPS[1], a, b), what)
         w = play(b, rom, f"{d}/{a}-{b}-2", STEPS[1], f"{d}/{a}-{b}-2out")
-        if not reads(b, w, ram1, mbc2, clock(STEPS[1], a, b), f"{pair}: {b} reads it"):
+        if not reads(b, w, ram1, mbc2, clock(STEPS[1], a, b), what):
             continue
         try:
-            convert(rom, b, a, f"{d}/{a}-{b}-2out", f"{d}/{a}-{b}-3", STEPS[1])
+            differs = convert(rom, b, a, f"{d}/{a}-{b}-2out", f"{d}/{a}-{b}-3", STEPS[1])
         except RuntimeError as e:
             check(False, f"{pair} → {a}: {e}")
             continue
+        what = f"{pair} → {a}: {a} reads it back"
+        if differs:
+            play_norom(a, f"{d}/{a}-{b}-3", STEPS[2], bump(ram1, mbc2), clock(STEPS[2], a, b), what)
         w = play(a, rom, f"{d}/{a}-{b}-3", STEPS[2], f"{d}/{a}-{b}-3out")
-        if reads(a, w, bump(ram1, mbc2), mbc2, clock(STEPS[2], a, b), f"{pair} → {a}: {a} reads it back"):
+        if reads(a, w, bump(ram1, mbc2), mbc2, clock(STEPS[2], a, b), what):
             print(f"  ok {pair} → {a}")
 
 
@@ -216,7 +253,8 @@ def cart_matrix(carts_dir):
             cart = f"{name}-{model}"
             d = f"{WORK}/saves/{cart}"
             os.makedirs(d, exist_ok=True)
-            seed_files(cart, size, opts.get("mbc2", False), opts.get("rtc", False), SEED_SECONDS, d)
+            seed_files(cart, size, opts.get("mbc2", False), opts.get("rtc", False) or opts.get("huc3", False),
+                       SEED_SECONDS, d)
             jobs += [(name, model, a) for a in CORES]
     with ThreadPoolExecutor(os.cpu_count()) as pool:
         for f in [pool.submit(chain, carts_dir, *j) for j in jobs]:
@@ -227,7 +265,9 @@ def main():
     carts = f"{WORK}/carts"
     gbrom.write_all(carts)
     cart_matrix(carts)
-    print(f"\n{len(failures)} failures")
+    print(f"\nwithout the ROM: {norom['refused']} refused, {norom['identical']} the same files, "
+          f"{norom['different']} other files (played)")
+    print(f"{len(failures)} failures")
     for f in failures:
         print(" ", f)
     sys.exit(1 if failures else 0)
