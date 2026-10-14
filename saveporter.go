@@ -111,9 +111,12 @@ func Detect(data []byte) (Info, error) {
 type Target struct {
 	Emulator Emulator
 	// StateVersion caps the core's state layout version, for an emulator older or newer than the
-	// one DefaultStateVersion assumes. Zero uses that default.
+	// one DefaultStateVersion assumes. Zero uses that default; KeepStateVersion keeps the source's.
 	StateVersion uint32
 }
+
+// KeepStateVersion is a Target.StateVersion that passes the state on at its own version.
+const KeepStateVersion = ^uint32(0)
 
 // DefaultStateVersion is the newest core state version an emulator is assumed to load, zero when
 // states are passed on at their own version.
@@ -153,7 +156,7 @@ func Convert(data []byte, to Target) ([]byte, error) {
 	if version == 0 {
 		version = DefaultStateVersion(to.Emulator)
 	}
-	if version != 0 {
+	if version != 0 && version != KeepStateVersion {
 		if state, err = mgba.ForVersion(state, version); err != nil {
 			return nil, err
 		}

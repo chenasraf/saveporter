@@ -10,3 +10,10 @@ linters:
     - gocritic
     - intrange
     - modernize
+  settings:
+    errcheck:
+      # Reports go to injected writers (for tests); a failed write of report text can't be acted on.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
