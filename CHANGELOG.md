@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/chenasraf/saveporter/compare/v0.1.0...v0.2.0) (2026-10-14)
+
+
+### Features
+
+* **gb:** convert battery saves without the rom when the files suffice ([668161b](https://github.com/chenasraf/saveporter/commit/668161b00416b0c863182e324ed3cc3e2009e4f0))
+* **gb:** game boy battery saves and gambatte states ([a29b91c](https://github.com/chenasraf/saveporter/commit/a29b91ca0fc16ce294385d5900d714ce8d88cdb7))
+
 ## 0.1.0 (2026-10-14)
 
 
