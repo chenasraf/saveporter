@@ -59,8 +59,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return exitFailed
 	}
 	fmt.Fprintln(stderr, "saveporter:", err)
-	var u usageError
-	if errors.As(err, &u) {
+	if _, ok := errors.AsType[usageError](err); ok {
 		return exitUsage
 	}
 	return exitFailed
