@@ -1,6 +1,6 @@
 module github.com/chenasraf/saveporter
 
-go 1.26.10
+go 1.27.3
 
 require (
 	github.com/klauspost/compress v1.19.0
