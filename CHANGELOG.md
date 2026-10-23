@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/chenasraf/saveporter/compare/v0.2.0...v0.2.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deps:** require go 1.26.10 ([f617b63](https://github.com/chenasraf/saveporter/commit/f617b63499ffdd8c108e339c90b8fa64fa2f113a))
+* **deps:** require go 1.27.3 ([5a153aa](https://github.com/chenasraf/saveporter/commit/5a153aab9d6e3a43a0b32bb41d17b8e2c4034cc7))
+
 ## [0.2.0](https://github.com/chenasraf/saveporter/compare/v0.1.0...v0.2.0) (2026-10-14)
 
 
