@@ -86,10 +86,10 @@ func ParseCart(header []byte) (Cart, error) {
 	return Cart{
 		Title:    clean(title),
 		GameCode: clean(code),
-		Type:    header[0x147],
-		ROMSize: header[0x148],
-		RAMSize: header[0x149],
-		CGB:     cgb,
+		Type:     header[0x147],
+		ROMSize:  header[0x148],
+		RAMSize:  header[0x149],
+		CGB:      cgb,
 	}, nil
 }
 

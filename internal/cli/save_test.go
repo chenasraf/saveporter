@@ -108,7 +108,7 @@ func TestSaveUsage(t *testing.T) {
 	dir := t.TempDir()
 	rom, srm, _ := clockGame(t, dir)
 	for name, args := range map[string][]string{
-		"no to":       {"save", "--rom", rom, "--from", "gambatte", srm, "x.srm"},
+		"no to":        {"save", "--rom", rom, "--from", "gambatte", srm, "x.srm"},
 		"unknown to":   {"save", "--rom", rom, "--from", "gambatte", "--to", "snes9x", srm, "x.srm"},
 		"no from":      {"save", "--rom", rom, "--to", "mgba", srm, "x.srm"},
 		"bad now":      {"save", "--rom", rom, "--from", "gambatte", "--to", "mgba", "--now", "soon", srm, "x.srm"},
